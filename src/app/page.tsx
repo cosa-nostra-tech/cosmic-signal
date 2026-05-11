@@ -1,18 +1,50 @@
+"use client";
+
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/layout/Container";
 import { Header } from "@/components/layout/Header";
 import { DemoThematic } from "@/components/demo/DemoThematic";
+import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
 
 export default function Home() {
-  // TODO: Wire real auth with Supabase server client
-  const isAuthenticated = false;
+  const supabase = createClient();
+  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user as { email: string } | null);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user as { email: string } | null ?? null);
+        setLoading(false);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  if (loading) {
+    return (
+      <>
+        <Header />
+        <Container className="py-20">
+          <div className="animate-pulse text-neutral-300">Loading…</div>
+        </Container>
+      </>
+    );
+  }
 
   return (
     <>
       <Header />
       <Container className="py-20">
-        {isAuthenticated ? (
+        {user ? (
           <div>
             <h1 className="text-2xl font-semibold tracking-tight mb-8">
               Your thematics

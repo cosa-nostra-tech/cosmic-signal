@@ -1,9 +1,27 @@
+"use client";
+
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
+import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
 
 export function Header() {
-  // TODO: Replace with real auth check via Supabase server client
-  const isAuthenticated = false;
+  const supabase = createClient();
+  const [user, setUser] = useState<{ email: string } | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user as { email: string } | null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user as { email: string } | null ?? null);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
 
   return (
     <header className="border-b border-neutral-200">
@@ -12,12 +30,15 @@ export function Header() {
           Cosmic Signal
         </Link>
         <div className="flex items-center gap-3">
-          {isAuthenticated ? (
-            <form action="/api/auth" method="POST">
-              <Button variant="ghost" type="submit" name="action" value="logout">
-                Sign out
-              </Button>
-            </form>
+          {user ? (
+            <>
+              <span className="text-xs text-neutral-500">{user.email}</span>
+              <form action="/api/auth" method="POST">
+                <Button variant="ghost" type="submit" name="action" value="logout">
+                  Sign out
+                </Button>
+              </form>
+            </>
           ) : (
             <Link href="/auth/login">
               <Button variant="secondary">Sign in</Button>
