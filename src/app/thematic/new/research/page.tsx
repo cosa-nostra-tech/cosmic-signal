@@ -15,7 +15,7 @@ interface Message {
 const SYSTEM_INTRO =
   "I'm your research agent. Tell me what you believe about the world, and I'll help you build a rigorous investment thesis around it. I'll present both supporting and contrarian viewpoints, help you decompose your thesis into a causal chain, and suggest positions to express it.";
 
-export default function ResearchPage() {
+export default function NewResearchPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,6 @@ export default function ResearchPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, finalizing]);
 
-  // Check if the latest assistant message has structured sections (thesis is ready)
   const canFinalize = messages.some(
     (m) =>
       m.role === "assistant" &&
@@ -55,10 +54,7 @@ export default function ResearchPage() {
       if (data.error) {
         setMessages((prev) => [
           ...prev,
-          {
-            role: "assistant",
-            content: `Error: ${data.error}. ${data.details || ""}`,
-          },
+          { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
         ]);
       } else {
         setMessages((prev) => [
@@ -69,10 +65,7 @@ export default function ResearchPage() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: "Connection error. Please try again.",
-        },
+        { role: "assistant", content: "Connection error. Please try again." },
       ]);
     } finally {
       setLoading(false);
@@ -98,7 +91,6 @@ export default function ResearchPage() {
         return;
       }
 
-      // Redirect to the new thematic dashboard
       router.push(`/thematic/${data.id}`);
     } catch {
       alert("Failed to create thematic. Please try again.");

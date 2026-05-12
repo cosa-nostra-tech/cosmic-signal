@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
-import { Container } from "@/components/layout/Container";
-import { Header } from "@/components/layout/Header";
 
 interface ThematicCardProps {
   id: string;
@@ -19,6 +17,13 @@ const healthLabels: Record<ThematicCardProps["health"], string> = {
   breaking: "⚠ Breaking",
 };
 
+const healthStyles: Record<ThematicCardProps["health"], string> = {
+  strengthening: "bg-green-50 text-green-700 border-green-200",
+  stable: "bg-neutral-900 text-white border-transparent",
+  under_pressure: "bg-amber-50 text-amber-700 border-amber-200",
+  breaking: "bg-red-50 text-red-700 border-red-200",
+};
+
 export function ThematicCard({
   id,
   title,
@@ -28,15 +33,19 @@ export function ThematicCard({
 }: ThematicCardProps) {
   return (
     <Link href={`/thematic/${id}`}>
-      <Card className="hover:bg-neutral-100 transition-colors duration-200 cursor-pointer">
-        <h3 className="text-lg font-semibold tracking-tight mb-2">
+      <Card className="hover:bg-neutral-100 transition-colors duration-200 cursor-pointer group">
+        <h3 className="text-lg font-semibold tracking-tight mb-2 group-hover:text-neutral-700">
           {title}
         </h3>
-        <p className="text-sm text-neutral-500 leading-relaxed line-clamp-2 mb-4">
+        <p className="text-sm text-neutral-500 leading-relaxed line-clamp-3 mb-4">
           {thesis}
         </p>
         <div className="flex items-center gap-3">
-          <Pill variant="solid">{healthLabels[health]}</Pill>
+          <span
+            className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${healthStyles[health]}`}
+          >
+            {healthLabels[health]}
+          </span>
           <span className="text-xs text-neutral-400">
             {signalCount} signal{signalCount !== 1 ? "s" : ""}
           </span>
