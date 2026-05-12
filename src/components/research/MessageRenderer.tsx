@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Pill } from "@/components/ui/Pill";
 import { ThematicCard } from "@/components/research/ThematicCard";
 
@@ -120,6 +121,8 @@ function ThesisSection({ content }: { content: string }) {
 }
 
 function CausalChainSection({ content }: { content: string }) {
+  const [showGuide, setShowGuide] = useState(false);
+
   const lines = content.split("\n").filter((l) => l.trim().startsWith("-"));
   const nodes: { type: string; label: string; desc: string }[] = [];
 
@@ -129,6 +132,40 @@ function CausalChainSection({ content }: { content: string }) {
       nodes.push({ type: match[1], label: match[1], desc: match[2].trim() });
     }
   }
+
+  const typeColors: Record<string, string> = {
+    Driver: "bg-blue-50 text-blue-700 border-blue-200",
+    Mechanism: "bg-purple-50 text-purple-700 border-purple-200",
+    Outcome: "bg-green-50 text-green-700 border-green-200",
+    Risk: "bg-red-50 text-red-700 border-red-200",
+  };
+
+  const guideContent = [
+    {
+      type: "Driver",
+      color: "bg-blue-50 text-blue-700 border-blue-200",
+      definition: "The structural force that sets the thesis in motion. Drivers are macro-level shifts — geopolitical, demographic, technological, regulatory — that change the rules of the game. They are not opinions; they are observable facts about how the world is changing.",
+      question: "Ask: \"What irreversible change is happening in the world that most people haven't priced in yet?\"",
+    },
+    {
+      type: "Mechanism",
+      color: "bg-purple-50 text-purple-700 border-purple-200",
+      definition: "The transmission path from driver to market outcome. Mechanisms explain *how* a driver actually moves through the real economy — through policy changes, supply chain shifts, capital flows, or behavioral changes. A driver without a mechanism is just a hunch.",
+      question: "Ask: \"What specific chain of events connects this macro shift to a stock price?\"",
+    },
+    {
+      type: "Outcome",
+      color: "bg-green-50 text-green-700 border-green-200",
+      definition: "The investable market effect. Outcomes are the tangible, measurable results that create investment opportunities — price premiums, margin expansion, revenue acceleration, or market share shifts. This is where your thesis meets your portfolio.",
+      question: "Ask: \"If I'm right, what number on what income statement moves, and by how much?\"",
+    },
+    {
+      type: "Risk",
+      color: "bg-red-50 text-red-700 border-red-200",
+      definition: "The credible way this chain breaks. Risks are not generic (\"market crash\") — they are specific, causal breaks in *your* chain. A demand shock that collapses commodity prices. A technology that eliminates a bottleneck. A political deal that removes a tariff.",
+      question: "Ask: \"What single event would make me close this position, and how would I see it coming?\"",
+    },
+  ];
 
   if (nodes.length === 0) {
     return (
@@ -141,36 +178,102 @@ function CausalChainSection({ content }: { content: string }) {
     );
   }
 
-  const typeColors: Record<string, string> = {
-    Driver: "bg-blue-50 text-blue-700 border-blue-200",
-    Mechanism: "bg-purple-50 text-purple-700 border-purple-200",
-    Outcome: "bg-green-50 text-green-700 border-green-200",
-    Risk: "bg-red-50 text-red-700 border-red-200",
-  };
-
   return (
-    <div className="border border-neutral-200 rounded-2xl p-6">
-      <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-4">
-        Causal Chain
-      </div>
-      <div className="space-y-3">
-        {nodes.map((node, i) => (
-          <div key={i}>
-            <div className="flex items-start gap-3">
-              <span
-                className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${typeColors[node.type] || "bg-neutral-50 text-neutral-700 border-neutral-200"}`}
-              >
-                {node.type}
-              </span>
-              <span className="text-sm text-neutral-700 leading-relaxed flex-1">
-                {renderInlineFormatting(node.desc)}
-              </span>
-            </div>
-            {i < nodes.length - 1 && (
-              <div className="ml-4 my-1 text-neutral-300">↓</div>
-            )}
+    <div className="relative">
+      <div className="border border-neutral-200 rounded-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
+            Causal Chain
           </div>
-        ))}
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-600 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            How to read this
+          </button>
+        </div>
+        <div className="space-y-3">
+          {nodes.map((node, i) => (
+            <div key={i}>
+              <div className="flex items-start gap-3">
+                <span
+                  className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${typeColors[node.type] || "bg-neutral-50 text-neutral-700 border-neutral-200"}`}
+                >
+                  {node.type}
+                </span>
+                <span className="text-sm text-neutral-700 leading-relaxed flex-1">
+                  {renderInlineFormatting(node.desc)}
+                </span>
+              </div>
+              {i < nodes.length - 1 && (
+                <div className="ml-4 my-1 text-neutral-300">↓</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Guide panel — slides in from the left */}
+      <div
+        className={`absolute top-0 left-0 h-full z-10 transition-all duration-300 ease-out ${
+          showGuide
+            ? "translate-x-0 opacity-100 pointer-events-auto"
+            : "-translate-x-full opacity-0 pointer-events-none"
+        }`}
+        style={{ width: "calc(100% + 320px)" }}
+      >
+        <div className="flex h-full">
+          {/* Guide content */}
+          <div className="w-[320px] shrink-0 bg-white border border-neutral-200 rounded-2xl p-5 shadow-lg overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                Reading a Causal Chain
+              </div>
+              <button
+                onClick={() => setShowGuide(false)}
+                className="text-neutral-300 hover:text-neutral-500 transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-xs text-neutral-500 leading-relaxed mb-5">
+              A causal chain is how you turn a worldview into a trade. Each link must be testable — if any link breaks, the whole thesis fails. That's a feature, not a bug.
+            </p>
+
+            <div className="space-y-4">
+              {guideContent.map((item, i) => (
+                <div key={i} className="space-y-1.5">
+                  <span
+                    className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${item.color}`}
+                  >
+                    {item.type}
+                  </span>
+                  <p className="text-xs text-neutral-600 leading-relaxed">
+                    {item.definition}
+                  </p>
+                  <p className="text-xs text-neutral-400 italic leading-relaxed">
+                    {item.question}
+                  </p>
+                  {i < guideContent.length - 1 && (
+                    <div className="text-neutral-200 text-center py-1">↓</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Spacer — pushes the original chain to the right */}
+          <div className="flex-1 min-w-[200px]" />
+        </div>
       </div>
     </div>
   );
