@@ -1,244 +1,592 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { Container } from "@/components/layout/Container";
 import { Header } from "@/components/layout/Header";
 import { Pill } from "@/components/ui/Pill";
-import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 
-interface Thematic {
-  id: string;
-  title: string;
-  thesis_statement: string;
-  status: string;
-  confidence: string;
-}
+// ── Types ────────────────────────────────────────────────────
 
-interface PositionRow {
+interface Holding {
   id: string;
   ticker: string;
   vehicle_type: string;
-  vehicle_name: string | null;
-  allocation_pct: number | null;
-  entry_rationale: string | null;
-  thematic_id: string;
-  thematics: { title: string } | { title: string }[];
+  shares: number;
+  avg_cost: number | null;
+  source: string;
+  source_thematic_id: string | null;
 }
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+interface PriceData {
+  price: number | null;
+  prev_close: number | null;
+  name: string;
+  currency: string;
+  returns: Record<string, number | null>;
+  error?: string;
+}
 
-  if (!user) redirect("/auth/login");
+interface ThematicInfo {
+  id: string;
+  title: string;
+}
 
-  // Check onboarding
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("onboarding_complete")
-    .eq("id", user.id)
-    .maybeSingle();
+type Period = "24h" | "1w" | "1m" | "1y" | "5y";
 
-  if (!profile?.onboarding_complete) redirect("/onboarding");
+const PERIODS: { key: Period; label: string }[] = [
+  { key: "24h", label: "24h" },
+  { key: "1w", label: "1W" },
+  { key: "1m", label: "1M" },
+  { key: "1y", label: "1Y" },
+  { key: "5y", label: "5Y" },
+];
 
-  // Fetch thematics
-  const { data: thematics } = await supabase
-    .from("thematics")
-    .select("id, title, thesis_statement, status, confidence")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false });
+// ── Main component ───────────────────────────────────────────
 
-  // Fetch all positions with their thematic titles
-  const { data: positions } = await supabase
-    .from("positions")
-    .select("id, ticker, vehicle_type, vehicle_name, allocation_pct, entry_rationale, thematic_id, thematics!inner(title)")
-    .eq("thematics.user_id", user.id)
-    .order("ticker");
+export default function DashboardPage() {
+  const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [prices, setPrices] = useState<Record<string, PriceData>>({});
+  const [thematics, setThematics] = useState<Record<string, ThematicInfo>>({});
+  const [period, setPeriod] = useState<Period>("1m");
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addTicker, setAddTicker] = useState("");
+  const [addShares, setAddShares] = useState("");
+  const [addAvgCost, setAddAvgCost] = useState("");
+  const [adding, setAdding] = useState(false);
 
-  // Aggregate positions by ticker
-  const tickerMap = new Map<string, {
-    ticker: string;
-    thematics: { id: string; title: string }[];
-    vehicles: Set<string>;
-    totalAllocation: number;
-    rationale: string | null;
-  }>();
+  // Fetch holdings
+  const fetchHoldings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/portfolio");
+      if (res.ok) {
+        const data = await res.json();
+        setHoldings(data.holdings || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch holdings:", e);
+    }
+  }, []);
 
-  for (const pos of (positions || []) as PositionRow[]) {
-    const thematicTitle = Array.isArray(pos.thematics) ? pos.thematics[0]?.title : pos.thematics?.title || "Unknown";
-    const existing = tickerMap.get(pos.ticker);
-    if (existing) {
-      existing.thematics.push({ id: pos.thematic_id, title: thematicTitle });
-      existing.vehicles.add(pos.vehicle_type);
-      existing.totalAllocation += pos.allocation_pct || 0;
-    } else {
-      tickerMap.set(pos.ticker, {
-        ticker: pos.ticker,
-        thematics: [{ id: pos.thematic_id, title: thematicTitle }],
-        vehicles: new Set([pos.vehicle_type]),
-        totalAllocation: pos.allocation_pct || 0,
-        rationale: pos.entry_rationale,
+  // Fetch thematics for tags
+  const fetchThematics = useCallback(async () => {
+    try {
+      const supabaseModule = await import("@/lib/supabase/client");
+      const supabase = supabaseModule.createClient();
+      const { data } = await supabase.from("thematics").select("id, title");
+      const map: Record<string, ThematicInfo> = {};
+      for (const t of data || []) {
+        map[t.id] = { id: t.id, title: t.title };
+      }
+      setThematics(map);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
+  // Fetch live prices for all held tickers
+  const fetchPrices = useCallback(async (tickers: string[]) => {
+    if (tickers.length === 0) {
+      setPrices({});
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/market/prices?tickers=${tickers.join(",")}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPrices(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch prices:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Also fetch positions from thematics (to show thematic tags on positions)
+  const [thematicPositions, setThematicPositions] = useState<Record<string, string[]>>({});
+
+  const fetchThematicPositions = useCallback(async () => {
+    try {
+      const supabaseModule = await import("@/lib/supabase/client");
+      const supabase = supabaseModule.createClient();
+      const { data: thematicsData } = await supabase
+        .from("thematics")
+        .select("id, title")
+        .eq("user_id", (await supabase.auth.getUser()).data.user?.id);
+
+      if (!thematicsData) return;
+
+      const map: Record<string, string[]> = {};
+      for (const th of thematicsData) {
+        const { data: positions } = await supabase
+          .from("positions")
+          .select("ticker")
+          .eq("thematic_id", th.id);
+        for (const pos of positions || []) {
+          if (!map[pos.ticker]) map[pos.ticker] = [];
+          map[pos.ticker].push(th.id);
+        }
+      }
+      setThematicPositions(map);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      await Promise.all([fetchHoldings(), fetchThematics(), fetchThematicPositions()]);
+    };
+    init();
+  }, [fetchHoldings, fetchThematics, fetchThematicPositions]);
+
+  // Fetch prices when holdings change
+  useEffect(() => {
+    if (holdings.length > 0) {
+      const tickers = holdings.map((h) => h.ticker);
+      fetchPrices(tickers);
+    }
+  }, [holdings, fetchPrices]);
+
+  // Auto-refresh prices every 60s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (holdings.length > 0) {
+        fetchPrices(holdings.map((h) => h.ticker));
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [holdings, fetchPrices]);
+
+  // Add stock handler
+  async function handleAddStock() {
+    if (!addTicker.trim()) return;
+    setAdding(true);
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: addTicker.trim().toUpperCase(),
+          vehicleType: "equity",
+          shares: addShares ? parseFloat(addShares) : undefined,
+          avgCost: addAvgCost ? parseFloat(addAvgCost) : undefined,
+          source: "direct",
+        }),
       });
+
+      if (res.ok) {
+        setShowAddModal(false);
+        setAddTicker("");
+        setAddShares("");
+        setAddAvgCost("");
+        await fetchHoldings();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to add stock");
+      }
+    } catch {
+      alert("Connection error. Please try again.");
+    } finally {
+      setAdding(false);
     }
   }
 
-  const aggregatedTickers = Array.from(tickerMap.values()).sort(
-    (a, b) => b.totalAllocation - a.totalAllocation
-  );
-
-  // Stats
-  const activeThematics = (thematics || []).filter((t: Thematic) => t.status === "active").length;
-  const totalTickers = aggregatedTickers.length;
-  const totalAllocation = aggregatedTickers.reduce((s, t) => s + t.totalAllocation, 0);
-
-  const statusToHealth = (status: string) => {
-    switch (status) {
-      case "active": return "stable";
-      case "paused": return "under_pressure";
-      case "broken": return "breaking";
-      default: return "stable";
+  // Remove stock handler
+  async function handleRemoveStock(id: string) {
+    try {
+      const res = await fetch(`/api/portfolio?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setHoldings((prev) => prev.filter((h) => h.id !== id));
+      }
+    } catch {
+      // Silently fail
     }
-  };
+  }
 
-  const healthStyles: Record<string, string> = {
-    stable: "bg-neutral-50 text-neutral-700 border-neutral-200",
-    under_pressure: "bg-amber-50 text-amber-700 border-amber-200",
-    breaking: "bg-red-50 text-red-700 border-red-200",
-    strengthening: "bg-green-50 text-green-700 border-green-200",
-  };
+  // Add all positions from a thematic to portfolio
+  async function handleAddFromThematic(thematicId: string) {
+    try {
+      const supabaseModule = await import("@/lib/supabase/client");
+      const supabase = supabaseModule.createClient();
+      const { data: positions } = await supabase
+        .from("positions")
+        .select("ticker, vehicle_type")
+        .eq("thematic_id", thematicId);
 
-  const healthLabels: Record<string, string> = {
-    stable: "● Stable",
-    under_pressure: "↓ Under Pressure",
-    breaking: "⚠ Breaking",
-    strengthening: "↑ Strengthening",
-  };
+      if (!positions || positions.length === 0) {
+        alert("No positions in this thematic");
+        return;
+      }
+
+      for (const pos of positions) {
+        await fetch("/api/portfolio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: pos.ticker,
+            vehicleType: pos.vehicle_type,
+            source: "thematic",
+            sourceThematicId: thematicId,
+          }),
+        });
+      }
+
+      await fetchHoldings();
+    } catch {
+      alert("Failed to import positions");
+    }
+  }
+
+  // Compute portfolio value
+  const totalValue = holdings.reduce((sum, h) => {
+    const p = prices[h.ticker]?.price;
+    return sum + (p ? p * (h.shares || 0) : 0);
+  }, 0);
+
+  const totalCost = holdings.reduce((sum, h) => {
+    return sum + (h.avg_cost ? h.avg_cost * (h.shares || 0) : 0);
+  }, 0);
+
+  const totalPnl = totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : 0;
 
   return (
     <>
       <Header />
       <Container className="py-16">
-        {/* Stats bar */}
-        <div className="flex items-center gap-6 mb-10">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <div className="text-2xl font-semibold">{activeThematics}</div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider">Active thematics</div>
+            <h1 className="text-2xl font-semibold tracking-tight">Portfolio</h1>
+            <p className="text-sm text-neutral-500 mt-1">
+              Track your positions across all thematics
+            </p>
           </div>
-          <div className="w-px h-10 bg-neutral-200" />
-          <div>
-            <div className="text-2xl font-semibold">{totalTickers}</div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider">Unique positions</div>
-          </div>
-          <div className="w-px h-10 bg-neutral-200" />
-          <div>
-            <div className="text-2xl font-semibold">{totalAllocation.toFixed(0)}%</div>
-            <div className="text-xs text-neutral-400 uppercase tracking-wider">Total allocation</div>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowAddModal(true)}>
+              + Add stock
+            </Button>
           </div>
         </div>
 
-        {/* Portfolio positions */}
-        <section className="mb-12">
-          <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider mb-4">
-            Portfolio positions
-          </h2>
-          {aggregatedTickers.length > 0 ? (
-            <div className="border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
-              {aggregatedTickers.map((ticker) => (
+        {/* Portfolio summary */}
+        {holdings.length > 0 && (
+          <div className="flex items-baseline gap-6 mb-8">
+            <div>
+              <div className="text-3xl font-semibold tabular-nums">
+                ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs text-neutral-400 uppercase tracking-wider mt-1">
+                Portfolio value
+              </div>
+            </div>
+            {totalCost > 0 && (
+              <div>
+                <div className={`text-lg font-semibold tabular-nums ${totalPnl >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}%
+                </div>
+                <div className="text-xs text-neutral-400 uppercase tracking-wider mt-1">
+                  Total P&L
+                </div>
+              </div>
+            )}
+            <div>
+              <div className="text-lg font-semibold">{holdings.length}</div>
+              <div className="text-xs text-neutral-400 uppercase tracking-wider mt-1">
+                Holdings
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Period selector */}
+        {holdings.length > 0 && (
+          <div className="flex gap-1 mb-4">
+            {PERIODS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                  period === p.key
+                    ? "bg-neutral-900 text-white"
+                    : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Holdings table */}
+        {loading ? (
+          <div className="text-sm text-neutral-400 py-8">Loading portfolio…</div>
+        ) : holdings.length > 0 ? (
+          <div className="border border-neutral-200 rounded-2xl overflow-hidden">
+            {/* Table header */}
+            <div className="grid grid-cols-[100px_1fr_80px_100px_80px_40px] gap-2 px-5 py-3 bg-neutral-50 border-b border-neutral-200 text-xs font-medium text-neutral-400 uppercase tracking-wider">
+              <div>Ticker</div>
+              <div>Thematics</div>
+              <div className="text-right">Price</div>
+              <div className="text-right">{period} %</div>
+              <div className="text-right">Value</div>
+              <div></div>
+            </div>
+
+            {/* Rows */}
+            {holdings.map((holding) => {
+              const priceData = prices[holding.ticker];
+              const price = priceData?.price;
+              const returnVal = priceData?.returns?.[period];
+              const name = priceData?.name || holding.ticker;
+              const hasError = priceData?.error || !price;
+              const value = price ? price * (holding.shares || 0) : 0;
+              const thematicIds = thematicPositions[holding.ticker] || [];
+
+              return (
                 <div
-                  key={ticker.ticker}
-                  className="flex items-center gap-4 px-6 py-4 hover:bg-neutral-50 transition-colors"
+                  key={holding.id}
+                  className="grid grid-cols-[100px_1fr_80px_100px_80px_40px] gap-2 px-5 py-3 border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50/50 transition-colors items-center"
                 >
                   {/* Ticker */}
-                  <span className="text-sm font-semibold font-mono w-20 shrink-0">
-                    {ticker.ticker}
-                  </span>
+                  <div>
+                    <div className="text-sm font-semibold font-mono">{holding.ticker}</div>
+                    <div className="text-xs text-neutral-400 truncate">{name}</div>
+                  </div>
 
                   {/* Thematic tags */}
-                  <div className="flex-1 flex flex-wrap gap-1.5">
-                    {ticker.thematics.map((th, i) => (
+                  <div className="flex flex-wrap gap-1">
+                    {/* From direct holdings */}
+                    {holding.source === "thematic" && holding.source_thematic_id && thematics[holding.source_thematic_id] && (
                       <Link
-                        key={i}
-                        href={`/thematic/${th.id}`}
-                        className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors"
+                        href={`/thematic/${holding.source_thematic_id}`}
+                        className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors"
                       >
-                        {th.title}
+                        {thematics[holding.source_thematic_id].title}
                       </Link>
-                    ))}
+                    )}
+                    {/* From other thematics that have this ticker */}
+                    {thematicIds
+                      .filter((tid) => tid !== holding.source_thematic_id)
+                      .map((tid) =>
+                        thematics[tid] ? (
+                          <Link
+                            key={tid}
+                            href={`/thematic/${tid}`}
+                            className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                          >
+                            {thematics[tid].title}
+                          </Link>
+                        ) : null
+                      )}
+                    {holding.source === "direct" && thematicIds.length === 0 && (
+                      <span className="text-xs text-neutral-300 italic">direct</span>
+                    )}
                   </div>
 
-                  {/* Vehicles */}
-                  <div className="hidden sm:flex gap-1.5 shrink-0">
-                    {Array.from(ticker.vehicles).map((v) => (
-                      <Pill key={v} variant="dashed">{v}</Pill>
-                    ))}
+                  {/* Price */}
+                  <div className="text-right">
+                    {hasError ? (
+                      <span className="text-xs text-neutral-300">—</span>
+                    ) : (
+                      <span className="text-sm font-medium tabular-nums">
+                        ${price?.toFixed(2)}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Allocation */}
-                  <span className="text-sm font-medium text-neutral-900 tabular-nums w-16 text-right shrink-0">
-                    {ticker.totalAllocation > 0 ? `${ticker.totalAllocation}%` : "—"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-8 text-center">
-              <p className="text-sm text-neutral-500 mb-4">
-                No positions yet. Create a thematic to get started.
-              </p>
-              <Link
-                href="/thematic/new/research"
-                className="inline-flex items-center px-5 py-2.5 text-sm font-medium rounded-full bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
-              >
-                Start researching
-              </Link>
-            </div>
-          )}
-        </section>
-
-        {/* Thematics overview */}
-        <section>
-          <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider mb-4">
-            Thematics
-          </h2>
-          {(thematics || []).length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(thematics as Thematic[]).map((thematic) => {
-                const health = statusToHealth(thematic.status);
-                return (
-                  <Link
-                    key={thematic.id}
-                    href={`/thematic/${thematic.id}`}
-                    className="bg-white border border-neutral-200 rounded-2xl p-5 hover:border-neutral-300 transition-colors group"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
+                  {/* Return */}
+                  <div className="text-right">
+                    {returnVal !== null && returnVal !== undefined ? (
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${
-                          healthStyles[health] || healthStyles.stable
+                        className={`text-sm font-medium tabular-nums ${
+                          returnVal >= 0 ? "text-green-600" : "text-red-600"
                         }`}
                       >
-                        {healthLabels[health] || healthLabels.stable}
+                        {returnVal >= 0 ? "+" : ""}{returnVal.toFixed(2)}%
                       </span>
-                      <span className="text-xs text-neutral-400">
-                        {thematic.confidence.charAt(0).toUpperCase() + thematic.confidence.slice(1)}
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold mb-1 group-hover:text-neutral-600 transition-colors">
-                      {thematic.title}
-                    </h3>
-                    <p className="text-xs text-neutral-500 leading-relaxed line-clamp-2">
-                      {thematic.thesis_statement}
-                    </p>
-                  </Link>
-                );
-              })}
+                    ) : (
+                      <span className="text-xs text-neutral-300">—</span>
+                    )}
+                  </div>
+
+                  {/* Value */}
+                  <div className="text-right text-sm tabular-nums">
+                    {value > 0
+                      ? `$${value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                      : "—"}
+                  </div>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => handleRemoveStock(holding.id)}
+                    className="text-neutral-300 hover:text-red-500 transition-colors"
+                    aria-label={`Remove ${holding.ticker}`}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-12 text-center">
+            <p className="text-neutral-500 mb-6">
+              Your portfolio is empty. Add stocks directly or import from your thematics.
+            </p>
+            <div className="flex justify-center gap-3">
+              <Button onClick={() => setShowAddModal(true)}>+ Add stock</Button>
+              <ImportFromThematicButton onImport={handleAddFromThematic} />
             </div>
-          ) : (
-            <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-8 text-center">
-              <p className="text-sm text-neutral-500">
-                No thematics yet.
-              </p>
-            </div>
-          )}
-        </section>
+          </div>
+        )}
+
+        {/* Thematics section — import positions */}
+        {holdings.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider mb-4">
+              Import from thematics
+            </h2>
+            <ImportFromThematicButton onImport={handleAddFromThematic} />
+          </div>
+        )}
       </Container>
+
+      {/* Add Stock Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowAddModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold">Add stock</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-neutral-400 hover:text-neutral-600 transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5 block">
+                  Ticker symbol
+                </label>
+                <input
+                  type="text"
+                  value={addTicker}
+                  onChange={(e) => setAddTicker(e.target.value.toUpperCase())}
+                  placeholder="e.g. AAPL"
+                  className="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm font-mono placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5 block">
+                    Shares
+                  </label>
+                  <input
+                    type="number"
+                    value={addShares}
+                    onChange={(e) => setAddShares(e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm tabular-nums placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5 block">
+                    Avg cost
+                  </label>
+                  <input
+                    type="number"
+                    value={addAvgCost}
+                    onChange={(e) => setAddAvgCost(e.target.value)}
+                    placeholder="$0.00"
+                    className="w-full rounded-xl border border-neutral-200 px-4 py-3 text-sm tabular-nums placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleAddStock}
+                disabled={!addTicker.trim() || adding}
+                className="w-full"
+              >
+                {adding ? "Adding…" : "Add to portfolio"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+// ── Import from Thematic Button ─────────────────────────────
+
+function ImportFromThematicButton({ onImport }: { onImport: (id: string) => Promise<void> }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [thematicsList, setThematicsList] = useState<{ id: string; title: string }[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  async function fetchThematics() {
+    try {
+      const supabaseModule = await import("@/lib/supabase/client");
+      const supabase = supabaseModule.createClient();
+      const { data } = await supabase.from("thematics").select("id, title");
+      setThematicsList(data || []);
+      setShowPicker(true);
+    } catch {
+      // Silently fail
+    }
+  }
+
+  async function handleImport(id: string) {
+    setImporting(true);
+    await onImport(id);
+    setImporting(false);
+    setShowPicker(false);
+  }
+
+  return (
+    <div className="relative">
+      <Button variant="secondary" onClick={fetchThematics}>
+        Import from thematic
+      </Button>
+
+      {showPicker && (
+        <div className="absolute top-full left-0 mt-2 w-72 bg-white border border-neutral-200 rounded-xl shadow-lg z-10 py-2 max-h-64 overflow-y-auto">
+          {thematicsList.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-neutral-400">No thematics yet</div>
+          ) : (
+            thematicsList.map((th) => (
+              <button
+                key={th.id}
+                onClick={() => handleImport(th.id)}
+                disabled={importing}
+                className="w-full text-left px-4 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-50"
+              >
+                {th.title}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }

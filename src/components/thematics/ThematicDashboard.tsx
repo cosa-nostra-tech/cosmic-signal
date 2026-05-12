@@ -112,6 +112,7 @@ export function ThematicDashboard({
   health,
 }: ThematicDashboardProps) {
   const [activating, setActivating] = useState(false);
+  const [addingToPortfolio, setAddingToPortfolio] = useState(false);
   const [status, setStatus] = useState(thematic.status);
   const isMonitored = status === "active";
 
@@ -138,6 +139,28 @@ export function ThematicDashboard({
       alert("Connection error. Please try again.");
     } finally {
       setActivating(false);
+    }
+  }
+
+  async function handleAddToPortfolio() {
+    setAddingToPortfolio(true);
+    try {
+      for (const pos of positions) {
+        await fetch("/api/portfolio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: pos.ticker,
+            vehicleType: pos.vehicle_type,
+            source: "thematic",
+            sourceThematicId: thematic.id,
+          }),
+        });
+      }
+    } catch {
+      alert("Failed to add positions to portfolio");
+    } finally {
+      setAddingToPortfolio(false);
     }
   }
 
@@ -359,6 +382,11 @@ export function ThematicDashboard({
         <Link href={`/thematic/${thematic.id}/research`}>
           <Button>Continue researching</Button>
         </Link>
+        {positions.length > 0 && (
+          <Button variant="secondary" onClick={handleAddToPortfolio} disabled={addingToPortfolio}>
+            {addingToPortfolio ? "Adding…" : "Add to portfolio"}
+          </Button>
+        )}
         {isMonitored ? (
           <Button variant="secondary" disabled>
             ✓ Monitoring active
