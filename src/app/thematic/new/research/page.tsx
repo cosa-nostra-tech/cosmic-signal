@@ -90,7 +90,7 @@ export default function NewResearchPage() {
   // ---- EXPANDED CHAT: research a specific direction ----
   const sendExpandedMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || loading || !expandedDirection) return;
+      if (!text.trim() || loading) return;
 
       const userMessage: Message = { role: "user", content: text.trim() };
       const updatedMessages = [...expandedMessages, userMessage];
@@ -124,42 +124,7 @@ export default function NewResearchPage() {
         setLoading(false);
       }
     },
-    [expandedMessages, loading, expandedDirection]
-  );
-
-  // Send with an explicit history (for the auto-kickoff on expand)
-  const sendExpandedMessageWithHistory = useCallback(
-    async (history: Message[]) => {
-      if (loading || !expandedDirection) return;
-      setLoading(true);
-
-      try {
-        const res = await fetch("/api/formation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: history }),
-        });
-
-        const data = await res.json();
-
-        if (data.error) {
-          setExpandedMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
-          ]);
-        } else {
-          setExpandedMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
-        }
-      } catch {
-        setExpandedMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Connection error. Please try again." },
-        ]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [loading, expandedDirection]
+    [expandedMessages, loading]
   );
 
   function handleSend() {
@@ -181,11 +146,32 @@ export default function NewResearchPage() {
     };
     const history = [seedMessage];
     setExpandedMessages(history);
+    setLoading(true);
 
-    // Auto-send to get first AI response
-    setTimeout(() => {
-      sendExpandedMessageWithHistory(history);
-    }, 100);
+    // Direct fetch — avoids stale closure on expandedDirection
+    fetch("/api/formation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          setExpandedMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
+          ]);
+        } else {
+          setExpandedMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+        }
+      })
+      .catch(() => {
+        setExpandedMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Connection error. Please try again." },
+        ]);
+      })
+      .finally(() => setLoading(false));
   }
 
   function handleCollapse() {
