@@ -6,10 +6,16 @@ import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/layout/Container";
 import { Header } from "@/components/layout/Header";
 import { MessageRenderer, parseSections } from "@/components/research/MessageRenderer";
+import { CinematicBackground } from "@/components/research/CinematicBackground";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+}
+
+interface Direction {
+  heading: string;
+  description: string;
 }
 
 const SYSTEM_INTRO =
@@ -33,10 +39,10 @@ export default function NewResearchPage() {
       parseSections(m.content).some((s) => s.type === "thesis")
   );
 
-  async function handleSend() {
-    if (!input.trim() || loading) return;
+  async function sendMessage(text: string) {
+    if (!text.trim() || loading) return;
 
-    const userMessage: Message = { role: "user", content: input.trim() };
+    const userMessage: Message = { role: "user", content: text.trim() };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setInput("");
@@ -72,6 +78,14 @@ export default function NewResearchPage() {
     }
   }
 
+  function handleSend() {
+    sendMessage(input);
+  }
+
+  function handleDirectionSelect(direction: Direction) {
+    sendMessage(`${direction.heading}: ${direction.description}`);
+  }
+
   async function handleFinalize() {
     if (!canFinalize || finalizing) return;
     setFinalizing(true);
@@ -100,6 +114,7 @@ export default function NewResearchPage() {
 
   return (
     <>
+      <CinematicBackground opacity={0.3} />
       <Header />
       <div className="min-h-[calc(100vh-57px)] flex flex-col">
         <Container className="flex-1 flex flex-col py-6">
@@ -129,13 +144,16 @@ export default function NewResearchPage() {
               <div key={i}>
                 {m.role === "user" ? (
                   <div className="flex justify-end">
-                    <div className="bg-neutral-900 text-white rounded-2xl px-5 py-3 max-w-md text-sm leading-relaxed whitespace-pre-wrap">
+                    <div className="bg-white text-neutral-900 rounded-2xl px-5 py-3 max-w-md text-sm leading-relaxed whitespace-pre-wrap shadow-lg">
                       {m.content}
                     </div>
                   </div>
                 ) : (
                   <div className="flex justify-start max-w-3xl">
-                    <MessageRenderer content={m.content} />
+                    <MessageRenderer
+                      content={m.content}
+                      onDirectionSelect={handleDirectionSelect}
+                    />
                   </div>
                 )}
               </div>
@@ -143,7 +161,7 @@ export default function NewResearchPage() {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-neutral-100 text-neutral-400 rounded-2xl px-5 py-3 text-sm">
+                <div className="bg-white/10 text-neutral-400 rounded-2xl px-5 py-3 text-sm border border-white/10">
                   Thinking…
                 </div>
               </div>
@@ -152,7 +170,7 @@ export default function NewResearchPage() {
             <div ref={bottomRef} />
           </div>
 
-          <div className="border-t border-neutral-200 pt-4">
+          <div className="border-t border-white/10 pt-4">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -166,7 +184,7 @@ export default function NewResearchPage() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="What do you believe about the world?"
                 disabled={loading || finalizing}
-                className="flex-1 rounded-xl border border-neutral-200 px-4 py-3 text-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all disabled:opacity-50"
+                className="flex-1 rounded-xl border border-white/20 bg-white/10 backdrop-blur-sm px-4 py-3 text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/40 focus:border-transparent transition-all disabled:opacity-50"
               />
               <Button type="submit" disabled={loading || finalizing || !input.trim()}>
                 Send

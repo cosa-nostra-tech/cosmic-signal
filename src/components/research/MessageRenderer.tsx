@@ -3,11 +3,16 @@
 import { Pill } from "@/components/ui/Pill";
 
 interface Section {
-  type: "thesis" | "causal_chain" | "positions" | "contrarian" | "monitoring" | "text";
+  type: "thesis" | "causal_chain" | "positions" | "contrarian" | "monitoring" | "directions" | "text";
   content: string;
 }
 
-function parseSections(text: string): Section[] {
+interface Direction {
+  heading: string;
+  description: string;
+}
+
+export function parseSections(text: string): Section[] {
   const sections: Section[] = [];
   const headerPattern = /^## (Thesis Statement|Causal Chain|Positions|Contrarian Case|Monitoring Queries)/gm;
 
@@ -54,26 +59,31 @@ function parseSections(text: string): Section[] {
   return sections;
 }
 
-function formatText(text: string) {
-  // Convert markdown bold to <strong> and render
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    // Handle bullet points
-    return part.split("\n").map((line, j) => {
-      if (line.startsWith("- ")) {
-        return (
-          <div key={`${i}-${j}`} className="flex gap-2 ml-2">
-            <span className="text-neutral-400 mt-0.5">•</span>
-            <span>{renderInlineFormatting(line.slice(2))}</span>
-          </div>
-        );
+/**
+ * Detect if a text section contains direction-style bullet points
+ * (bold heading + colon + description). Returns parsed directions or null.
+ */
+function tryParseDirections(text: string): Direction[] | null {
+  const lines = text.split("\n");
+  const directions: Direction[] = [];
+
+  for (const line of lines) {
+    // Match: - **Heading:** description  or  • **Heading:** description
+    const match = line.match(/^\s*[-•]\s+\*\*([^*]+)\*\*:?\s*(.*)/);
+    if (match) {
+      const heading = match[1].trim().replace(/:$/, "");
+      const description = match[2].trim();
+      if (heading && description) {
+        directions.push({ heading, description });
       }
-      return j > 0 ? <br key={`${i}-${j}`} /> : line;
-    });
-  });
+    }
+  }
+
+  // Only treat as directions if there are 2+ items with meaningful descriptions
+  if (directions.length >= 2) {
+    return directions;
+  }
+  return null;
 }
 
 function renderInlineFormatting(text: string) {
@@ -83,6 +93,26 @@ function renderInlineFormatting(text: string) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
     }
     return <span key={i}>{part}</span>;
+  });
+}
+
+function formatText(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return part.split("\n").map((line, j) => {
+      if (line.startsWith("- ") || line.startsWith("• ")) {
+        return (
+          <div key={`${i}-${j}`} className="flex gap-2 ml-2">
+            <span className="text-neutral-400 mt-0.5">•</span>
+            <span>{renderInlineFormatting(line.replace(/^[-•]\s*/, ""))}</span>
+          </div>
+        );
+      }
+      return j > 0 ? <br key={`${i}-${j}`} /> : line;
+    });
   });
 }
 
@@ -120,14 +150,14 @@ function CausalChainSection({ content }: { content: string }) {
   }
 
   const typeColors: Record<string, string> = {
-    Driver: "bg-blue-50 text-blue-700 border-blue-200",
-    Mechanism: "bg-purple-50 text-purple-700 border-purple-200",
-    Outcome: "bg-green-50 text-green-700 border-green-200",
-    Risk: "bg-red-50 text-red-700 border-red-200",
+    Driver: "bg-blue-900/40 text-blue-300 border-blue-700/50",
+    Mechanism: "bg-purple-900/40 text-purple-300 border-purple-700/50",
+    Outcome: "bg-green-900/40 text-green-300 border-green-700/50",
+    Risk: "bg-red-900/40 text-red-300 border-red-700/50",
   };
 
   return (
-    <div className="border border-neutral-200 rounded-2xl p-6">
+    <div className="border border-white/10 rounded-2xl p-6 bg-white/5">
       <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-4">
         Causal Chain
       </div>
@@ -136,16 +166,16 @@ function CausalChainSection({ content }: { content: string }) {
           <div key={i}>
             <div className="flex items-start gap-3">
               <span
-                className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${typeColors[node.type] || "bg-neutral-50 text-neutral-700 border-neutral-200"}`}
+                className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full border ${typeColors[node.type] || "bg-white/10 text-neutral-300 border-white/20"}`}
               >
                 {node.type}
               </span>
-              <span className="text-sm text-neutral-700 leading-relaxed flex-1">
+              <span className="text-sm text-neutral-200 leading-relaxed flex-1">
                 {renderInlineFormatting(node.desc)}
               </span>
             </div>
             {i < nodes.length - 1 && (
-              <div className="ml-4 my-1 text-neutral-300">↓</div>
+              <div className="ml-4 my-1 text-neutral-500">↓</div>
             )}
           </div>
         ))}
@@ -171,17 +201,17 @@ function PositionsSection({ content }: { content: string }) {
 
   if (positions.length === 0) {
     return (
-      <div className="border border-neutral-200 rounded-2xl p-6">
+      <div className="border border-white/10 rounded-2xl p-6 bg-white/5">
         <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-3">
           Positions
         </div>
-        <div className="text-sm text-neutral-600 whitespace-pre-wrap">{formatText(content)}</div>
+        <div className="text-sm text-neutral-300 whitespace-pre-wrap">{formatText(content)}</div>
       </div>
     );
   }
 
   return (
-    <div className="border border-neutral-200 rounded-2xl p-6">
+    <div>
       <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-4">
         Positions
       </div>
@@ -189,13 +219,15 @@ function PositionsSection({ content }: { content: string }) {
         {positions.map((pos, i) => (
           <div
             key={i}
-            className="bg-white border border-neutral-200 rounded-xl p-4 hover:border-neutral-300 transition-colors"
+            className="border border-white/10 rounded-xl p-4 bg-white/5 hover:bg-white/10 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-semibold font-mono">{pos.ticker}</span>
-              <Pill variant="dashed">{pos.vehicle}</Pill>
+              <span className="text-sm font-semibold font-mono text-white">{pos.ticker}</span>
+              <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full border border-dashed border-neutral-500 text-neutral-400">
+                {pos.vehicle}
+              </span>
             </div>
-            <p className="text-xs text-neutral-500 leading-relaxed">
+            <p className="text-xs text-neutral-400 leading-relaxed">
               {renderInlineFormatting(pos.rationale)}
             </p>
           </div>
@@ -207,17 +239,17 @@ function PositionsSection({ content }: { content: string }) {
 
 function ContrarianSection({ content }: { content: string }) {
   return (
-    <div className="border border-red-200 bg-red-50/30 rounded-2xl p-6">
+    <div className="border border-red-500/20 bg-red-950/20 rounded-2xl p-6">
       <div className="text-xs font-medium text-red-400 uppercase tracking-wider mb-3">
         Contrarian Case
       </div>
-      <div className="text-sm text-neutral-700 leading-relaxed">
+      <div className="text-sm text-neutral-300 leading-relaxed">
         {content.split("\n").map((line, i) => {
-          if (line.startsWith("- ")) {
+          if (line.startsWith("- ") || line.startsWith("• ")) {
             return (
               <div key={i} className="flex gap-2 ml-2 mb-1">
-                <span className="text-red-300 mt-0.5">•</span>
-                <span>{renderInlineFormatting(line.slice(2))}</span>
+                <span className="text-red-400/60 mt-0.5">•</span>
+                <span>{renderInlineFormatting(line.replace(/^[-•]\s*/, ""))}</span>
               </div>
             );
           }
@@ -237,33 +269,37 @@ function MonitoringSection({ content }: { content: string }) {
     if (match) {
       queries.push({ text: match[1].trim(), meta: match[2].trim() });
     } else {
-      const clean = line.replace(/^-\s*/, "").trim();
+      const clean = line.replace(/^[-•]\s*/, "").trim();
       if (clean) queries.push({ text: clean, meta: "" });
     }
   }
 
   if (queries.length === 0) {
     return (
-      <div className="border border-neutral-200 rounded-2xl p-6">
+      <div className="border border-white/10 rounded-2xl p-6 bg-white/5">
         <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-3">
           Monitoring Queries
         </div>
-        <div className="text-sm text-neutral-600 whitespace-pre-wrap">{formatText(content)}</div>
+        <div className="text-sm text-neutral-300 whitespace-pre-wrap">{formatText(content)}</div>
       </div>
     );
   }
 
   return (
-    <div className="border border-neutral-200 rounded-2xl p-6">
+    <div className="border border-white/10 rounded-2xl p-6 bg-white/5">
       <div className="text-xs font-medium text-neutral-400 uppercase tracking-wider mb-4">
         Monitoring Queries
       </div>
       <div className="space-y-2">
         {queries.map((q, i) => (
           <div key={i} className="flex items-start gap-3 py-2">
-            <span className="text-neutral-300 text-xs mt-0.5 font-mono w-5 text-right">{i + 1}.</span>
-            <span className="text-sm text-neutral-700 flex-1">{q.text}</span>
-            {q.meta && <Pill variant="dashed">{q.meta}</Pill>}
+            <span className="text-neutral-500 text-xs mt-0.5 font-mono w-5 text-right">{i + 1}.</span>
+            <span className="text-sm text-neutral-200 flex-1">{q.text}</span>
+            {q.meta && (
+              <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full border border-dashed border-neutral-500 text-neutral-400">
+                {q.meta}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -271,15 +307,71 @@ function MonitoringSection({ content }: { content: string }) {
   );
 }
 
-function TextSection({ content }: { content: string }) {
+interface DirectionsSectionProps {
+  directions: Direction[];
+  onDirectionSelect?: (direction: Direction) => void;
+}
+
+function DirectionsSection({ directions, onDirectionSelect }: DirectionsSectionProps) {
+  if (!onDirectionSelect) {
+    // Fallback: just render as text
+    return (
+      <div className="text-sm text-neutral-300 leading-relaxed whitespace-pre-wrap">
+        {formatText(directions.map((d) => `- **${d.heading}:** ${d.description}`).join("\n"))}
+      </div>
+    );
+  }
+
   return (
-    <div className="text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">
+    <div className="grid grid-cols-1 gap-3">
+      {directions.map((dir, i) => (
+        <button
+          key={i}
+          onClick={() => onDirectionSelect(dir)}
+          className="border border-white/10 rounded-2xl p-5 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-left group cursor-pointer"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-white mb-1">
+                {dir.heading}
+              </div>
+              <div className="text-xs text-neutral-400 leading-relaxed">
+                {dir.description}
+              </div>
+            </div>
+            <div className="shrink-0 mt-1">
+              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-full bg-white/10 text-neutral-300 group-hover:bg-white group-hover:text-neutral-900 transition-all">
+                Explore →
+              </span>
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TextSection({ content, onDirectionSelect }: { content: string; onDirectionSelect?: (direction: Direction) => void }) {
+  // Check if this text block contains direction-style bullet points
+  const directions = tryParseDirections(content);
+
+  if (directions) {
+    return <DirectionsSection directions={directions} onDirectionSelect={onDirectionSelect} />;
+  }
+
+  return (
+    <div className="text-sm text-neutral-300 leading-relaxed whitespace-pre-wrap">
       {formatText(content)}
     </div>
   );
 }
 
-export function MessageRenderer({ content }: { content: string }) {
+interface MessageRendererProps {
+  content: string;
+  onDirectionSelect?: (direction: Direction) => void;
+}
+
+export function MessageRenderer({ content, onDirectionSelect }: MessageRendererProps) {
   const sections = parseSections(content);
 
   return (
@@ -297,11 +389,9 @@ export function MessageRenderer({ content }: { content: string }) {
           case "monitoring":
             return <MonitoringSection key={i} content={section.content} />;
           default:
-            return <TextSection key={i} content={section.content} />;
+            return <TextSection key={i} content={section.content} onDirectionSelect={onDirectionSelect} />;
         }
       })}
     </div>
   );
 }
-
-export { parseSections };
