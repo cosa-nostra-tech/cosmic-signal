@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/layout/Container";
 import { Header } from "@/components/layout/Header";
 import { MessageRenderer, parseSections } from "@/components/research/MessageRenderer";
-import { ThematicCard } from "@/components/research/ThematicCard";
 
 interface Message {
   role: "user" | "assistant";
@@ -26,7 +25,6 @@ export default function NewResearchPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
-  const [directions, setDirections] = useState<Direction[]>([]);
   const [expandedDirection, setExpandedDirection] = useState<Direction | null>(null);
   const [expandedMessages, setExpandedMessages] = useState<Message[]>([]);
   const [expandedInput, setExpandedInput] = useState("");
@@ -49,7 +47,7 @@ export default function NewResearchPage() {
       parseSections(m.content).some((s) => s.type === "thesis")
   );
 
-  // Initial conversation — discover directions
+  // ---- MAIN CHAT: discover directions ----
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || loading) return;
@@ -89,7 +87,7 @@ export default function NewResearchPage() {
     [messages, loading]
   );
 
-  // Expanded chat — research a specific direction
+  // ---- EXPANDED CHAT: research a specific direction ----
   const sendExpandedMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || loading || !expandedDirection) return;
@@ -129,6 +127,41 @@ export default function NewResearchPage() {
     [expandedMessages, loading, expandedDirection]
   );
 
+  // Send with an explicit history (for the auto-kickoff on expand)
+  const sendExpandedMessageWithHistory = useCallback(
+    async (history: Message[]) => {
+      if (loading || !expandedDirection) return;
+      setLoading(true);
+
+      try {
+        const res = await fetch("/api/formation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+          setExpandedMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
+          ]);
+        } else {
+          setExpandedMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+        }
+      } catch {
+        setExpandedMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Connection error. Please try again." },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loading, expandedDirection]
+  );
+
   function handleSend() {
     sendMessage(input);
   }
@@ -139,20 +172,19 @@ export default function NewResearchPage() {
 
   function handleDirectionExpand(direction: Direction) {
     setExpandedDirection(direction);
-    // Seed the expanded chat with the direction as context
-    setExpandedMessages([
-      {
-        role: "user",
-        content: `I want to explore the "${direction.heading}" thematic. ${direction.description}`,
-      },
-    ]);
     setExpandedInput("");
+
+    // Seed the expanded chat with the direction as context
+    const seedMessage: Message = {
+      role: "user",
+      content: `I want to explore the "${direction.heading}" thematic. ${direction.description}. Help me build an investment thesis around this. Decompose it into a causal chain, suggest specific positions with tickers, present the contrarian case, and propose monitoring queries.`,
+    };
+    const history = [seedMessage];
+    setExpandedMessages(history);
 
     // Auto-send to get first AI response
     setTimeout(() => {
-      sendExpandedMessage(
-        `I want to explore the "${direction.heading}" thematic. ${direction.description}. Help me build an investment thesis around this. Decompose it into a causal chain, suggest specific positions with tickers, present the contrarian case, and propose monitoring queries.`
-      );
+      sendExpandedMessageWithHistory(history);
     }, 100);
   }
 
@@ -316,13 +348,7 @@ export default function NewResearchPage() {
                   <div className="flex justify-start max-w-4xl w-full">
                     <MessageRenderer
                       content={m.content}
-                      onDirectionSelect={(dir) => {
-                        setDirections((prev) =>
-                          prev.some((d) => d.heading === dir.heading)
-                            ? prev
-                            : [...prev, dir]
-                        );
-                      }}
+                      onDirectionSelect={handleDirectionExpand}
                     />
                   </div>
                 )}
