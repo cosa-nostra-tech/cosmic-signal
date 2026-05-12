@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Pill } from "@/components/ui/Pill";
 import { Button } from "@/components/ui/Button";
@@ -110,10 +111,35 @@ export function ThematicDashboard({
   signals,
   health,
 }: ThematicDashboardProps) {
+  const [activating, setActivating] = useState(false);
+  const [status, setStatus] = useState(thematic.status);
+  const isMonitored = status === "active";
+
   const confidenceLabel =
     thematic.confidence === "very_high"
       ? "Very High"
       : thematic.confidence.charAt(0).toUpperCase() + thematic.confidence.slice(1);
+
+  async function handleActivate() {
+    setActivating(true);
+    try {
+      const res = await fetch("/api/thematic/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thematicId: thematic.id }),
+      });
+      if (res.ok) {
+        setStatus("active");
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to activate monitoring");
+      }
+    } catch {
+      alert("Connection error. Please try again.");
+    } finally {
+      setActivating(false);
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -333,7 +359,15 @@ export function ThematicDashboard({
         <Link href={`/thematic/${thematic.id}/research`}>
           <Button>Continue researching</Button>
         </Link>
-        <Button variant="secondary">Activate monitoring</Button>
+        {isMonitored ? (
+          <Button variant="secondary" disabled>
+            ✓ Monitoring active
+          </Button>
+        ) : (
+          <Button variant="secondary" onClick={handleActivate} disabled={activating}>
+            {activating ? "Activating…" : "Activate monitoring"}
+          </Button>
+        )}
       </div>
     </div>
   );
