@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/layout/Container";
 import { Header } from "@/components/layout/Header";
 import { MessageRenderer, parseSections } from "@/components/research/MessageRenderer";
+import { ThematicCard } from "@/components/research/ThematicCard";
 
 interface Message {
   role: "user" | "assistant";
@@ -25,75 +26,151 @@ export default function NewResearchPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [directions, setDirections] = useState<Direction[]>([]);
+  const [expandedDirection, setExpandedDirection] = useState<Direction | null>(null);
+  const [expandedMessages, setExpandedMessages] = useState<Message[]>([]);
+  const [expandedInput, setExpandedInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const expandedBottomRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
+  // Scroll management
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading, finalizing]);
+    if (expandedDirection) {
+      expandedBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, expandedMessages, loading, finalizing, expandedDirection]);
 
-  const canFinalize = messages.some(
+  const canFinalize = expandedMessages.some(
     (m) =>
       m.role === "assistant" &&
       parseSections(m.content).some((s) => s.type === "thesis")
   );
 
-  async function sendMessage(text: string) {
-    if (!text.trim() || loading) return;
+  // Initial conversation — discover directions
+  const sendMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim() || loading) return;
 
-    const userMessage: Message = { role: "user", content: text.trim() };
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    setInput("");
-    setLoading(true);
+      const userMessage: Message = { role: "user", content: text.trim() };
+      const updatedMessages = [...messages, userMessage];
+      setMessages(updatedMessages);
+      setInput("");
+      setLoading(true);
 
-    try {
-      const res = await fetch("/api/formation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updatedMessages }),
-      });
+      try {
+        const res = await fetch("/api/formation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: updatedMessages }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (data.error) {
+        if (data.error) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
+          ]);
+        } else {
+          setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+        }
+      } catch {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
+          { role: "assistant", content: "Connection error. Please try again." },
         ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.message },
-        ]);
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Connection error. Please try again." },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [messages, loading]
+  );
+
+  // Expanded chat — research a specific direction
+  const sendExpandedMessage = useCallback(
+    async (text: string) => {
+      if (!text.trim() || loading || !expandedDirection) return;
+
+      const userMessage: Message = { role: "user", content: text.trim() };
+      const updatedMessages = [...expandedMessages, userMessage];
+      setExpandedMessages(updatedMessages);
+      setExpandedInput("");
+      setLoading(true);
+
+      try {
+        const res = await fetch("/api/formation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: updatedMessages }),
+        });
+
+        const data = await res.json();
+
+        if (data.error) {
+          setExpandedMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Error: ${data.error}. ${data.details || ""}` },
+          ]);
+        } else {
+          setExpandedMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+        }
+      } catch {
+        setExpandedMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Connection error. Please try again." },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [expandedMessages, loading, expandedDirection]
+  );
 
   function handleSend() {
     sendMessage(input);
   }
 
-  function handleDirectionSelect(direction: Direction) {
-    sendMessage(`${direction.heading}: ${direction.description}`);
+  function handleExpandedSend() {
+    sendExpandedMessage(expandedInput);
+  }
+
+  function handleDirectionExpand(direction: Direction) {
+    setExpandedDirection(direction);
+    // Seed the expanded chat with the direction as context
+    setExpandedMessages([
+      {
+        role: "user",
+        content: `I want to explore the "${direction.heading}" thematic. ${direction.description}`,
+      },
+    ]);
+    setExpandedInput("");
+
+    // Auto-send to get first AI response
+    setTimeout(() => {
+      sendExpandedMessage(
+        `I want to explore the "${direction.heading}" thematic. ${direction.description}. Help me build an investment thesis around this. Decompose it into a causal chain, suggest specific positions with tickers, present the contrarian case, and propose monitoring queries.`
+      );
+    }, 100);
+  }
+
+  function handleCollapse() {
+    setExpandedDirection(null);
+    setExpandedMessages([]);
+    setExpandedInput("");
   }
 
   async function handleFinalize() {
-    if (!canFinalize || finalizing) return;
+    if (!canFinalize || finalizing || !expandedDirection) return;
     setFinalizing(true);
 
     try {
       const res = await fetch("/api/formation/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages: expandedMessages }),
       });
 
       const data = await res.json();
@@ -111,6 +188,103 @@ export default function NewResearchPage() {
     }
   }
 
+  // ---- EXPANDED CHAT VIEW ----
+  if (expandedDirection) {
+    return (
+      <>
+        <Header />
+        <div className="min-h-[calc(100vh-57px)] flex flex-col bg-white">
+          {/* Direction banner */}
+          <div className="border-b border-neutral-200 bg-neutral-50 px-6 py-4">
+            <Container>
+              <div className="flex items-center justify-between">
+                <div>
+                  <button
+                    onClick={handleCollapse}
+                    className="text-sm text-neutral-400 hover:text-neutral-600 transition-colors mb-1 flex items-center gap-1"
+                  >
+                    ← Back to directions
+                  </button>
+                  <h2 className="text-lg font-semibold text-neutral-900">
+                    {expandedDirection.heading}
+                  </h2>
+                  <p className="text-sm text-neutral-500 mt-0.5">
+                    {expandedDirection.description}
+                  </p>
+                </div>
+                {canFinalize && (
+                  <Button
+                    onClick={handleFinalize}
+                    disabled={finalizing}
+                    className="bg-green-600 hover:bg-green-700 text-white shrink-0"
+                  >
+                    {finalizing ? "Creating thematic…" : "✓ Save thematic"}
+                  </Button>
+                )}
+              </div>
+            </Container>
+          </div>
+
+          <Container className="flex-1 flex flex-col py-6">
+            <div className="flex-1 overflow-y-auto mb-6 space-y-6 max-h-[calc(100vh-280px)]">
+              {expandedMessages.map((m, i) => (
+                <div key={i}>
+                  {m.role === "user" ? (
+                    <div className="flex justify-end">
+                      <div className="bg-neutral-900 text-white rounded-2xl px-5 py-3 max-w-md text-sm leading-relaxed whitespace-pre-wrap">
+                        {m.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-start max-w-3xl">
+                      <MessageRenderer content={m.content} />
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {loading && (
+                <div className="flex justify-start">
+                  <div className="bg-neutral-100 text-neutral-400 rounded-2xl px-5 py-3 text-sm">
+                    Thinking…
+                  </div>
+                </div>
+              )}
+
+              <div ref={expandedBottomRef} />
+            </div>
+
+            <div className="border-t border-neutral-200 pt-4">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleExpandedSend();
+                }}
+                className="flex gap-3"
+              >
+                <input
+                  type="text"
+                  value={expandedInput}
+                  onChange={(e) => setExpandedInput(e.target.value)}
+                  placeholder="Dig deeper, challenge the thesis, ask for tickers…"
+                  disabled={loading || finalizing}
+                  className="flex-1 rounded-xl border border-neutral-200 px-4 py-3 text-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all disabled:opacity-50"
+                />
+                <Button
+                  type="submit"
+                  disabled={loading || finalizing || !expandedInput.trim()}
+                >
+                  Send
+                </Button>
+              </form>
+            </div>
+          </Container>
+        </div>
+      </>
+    );
+  }
+
+  // ---- MAIN VIEW: Directions cards ----
   return (
     <>
       <Header />
@@ -120,17 +294,9 @@ export default function NewResearchPage() {
             <h1 className="text-sm font-medium text-neutral-400 uppercase tracking-wider">
               Formation Engine
             </h1>
-            {canFinalize && (
-              <Button
-                onClick={handleFinalize}
-                disabled={finalizing}
-                className="bg-green-600 hover:bg-green-700 text-white"
-              >
-                {finalizing ? "Creating thematic…" : "✓ Finalize thematic"}
-              </Button>
-            )}
           </div>
 
+          {/* Messages area — shows user thesis + AI intro + direction cards */}
           <div className="flex-1 overflow-y-auto mb-6 space-y-6 max-h-[calc(100vh-260px)]">
             {messages.length === 0 && (
               <div className="text-sm text-neutral-400 leading-relaxed max-w-lg">
@@ -147,10 +313,16 @@ export default function NewResearchPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex justify-start max-w-3xl">
+                  <div className="flex justify-start max-w-4xl w-full">
                     <MessageRenderer
                       content={m.content}
-                      onDirectionSelect={handleDirectionSelect}
+                      onDirectionSelect={(dir) => {
+                        setDirections((prev) =>
+                          prev.some((d) => d.heading === dir.heading)
+                            ? prev
+                            : [...prev, dir]
+                        );
+                      }}
                     />
                   </div>
                 )}
@@ -168,6 +340,7 @@ export default function NewResearchPage() {
             <div ref={bottomRef} />
           </div>
 
+          {/* Input */}
           <div className="border-t border-neutral-200 pt-4">
             <form
               onSubmit={(e) => {
@@ -184,7 +357,10 @@ export default function NewResearchPage() {
                 disabled={loading || finalizing}
                 className="flex-1 rounded-xl border border-neutral-200 px-4 py-3 text-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all disabled:opacity-50"
               />
-              <Button type="submit" disabled={loading || finalizing || !input.trim()}>
+              <Button
+                type="submit"
+                disabled={loading || finalizing || !input.trim()}
+              >
                 Send
               </Button>
             </form>

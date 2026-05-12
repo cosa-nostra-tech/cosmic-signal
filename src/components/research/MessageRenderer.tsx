@@ -1,6 +1,7 @@
 "use client";
 
 import { Pill } from "@/components/ui/Pill";
+import { ThematicCard } from "@/components/research/ThematicCard";
 
 interface Section {
   type: "thesis" | "causal_chain" | "positions" | "contrarian" | "monitoring" | "text";
@@ -307,27 +308,16 @@ function DirectionsSection({ directions, onDirectionSelect }: DirectionsSectionP
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full">
       {directions.map((dir, i) => (
-        <button
+        <ThematicCard
           key={i}
-          onClick={() => onDirectionSelect(dir)}
-          className="border border-neutral-200 rounded-2xl p-5 bg-neutral-50 hover:bg-neutral-100 hover:border-neutral-300 transition-all text-left group cursor-pointer"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-neutral-900 mb-1">
-                {dir.heading}
-              </div>
-              <div className="text-xs text-neutral-500 leading-relaxed">
-                {dir.description}
-              </div>
-            </div>
-            <span className="shrink-0 inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-full bg-neutral-200 text-neutral-600 group-hover:bg-neutral-900 group-hover:text-white transition-all">
-              Explore →
-            </span>
-          </div>
-        </button>
+          heading={dir.heading}
+          description={dir.description}
+          imageUrl=""
+          onExpand={() => onDirectionSelect(dir)}
+          isExpanded={false}
+        />
       ))}
     </div>
   );
