@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -79,6 +80,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch user's risk params and market access to tailor suggestions
+    let userContext = "";
+    try {
+      const { createServerClient } = await import("@supabase/ssr");
+      const serviceClient = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: { getAll() { return []; }, setAll() {} },
+        }
+      );
+
+      // Get user from auth header if available, otherwise skip personalization
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (user) {
+        const [riskRes, marketRes] = await Promise.all([
+          serviceClient.from("risk_params").select("*").eq("user_id", user.id).maybeSingle(),
+          serviceClient.from("market_access").select("*").eq("user_id", user.id).maybeSingle(),
+        ]);
+
+        const risk = riskRes.data;
+        const market = marketRes.data;
+
+        if (risk || market) {
+          const parts: string[] = ["\n\nUSER INVESTMENT PROFILE (tailor all suggestions to these constraints):"];
+          if (risk) {
+            parts.push(`- Risk tolerance: ${risk.risk_tolerance}`);
+            parts.push(`- Investment horizon: ${risk.horizon_months} months`);
+            parts.push(`- Max sector concentration: ${risk.max_concentration_pct}%`);
+            parts.push(`- Max single position: ${risk.max_single_position_pct}%`);
+          }
+          if (market) {
+            parts.push(`- Available markets: ${(market as Record<string, unknown>).markets ? (market.markets as string[]).join(", ") : "US"}`);
+            parts.push(`- Available instruments: ${(market as Record<string, unknown>).vehicle_types ? (market.vehicle_types as string[]).join(", ") : "equity, ETF, options"}`);
+          }
+          parts.push("- ONLY suggest positions on exchanges and instruments the user can access.");
+          parts.push("- Adjust position sizing recommendations to respect the concentration and single-position limits.");
+          parts.push("- Match the risk level of suggestions to the user's stated risk tolerance.");
+          userContext = parts.join("\n");
+        }
+      }
+    } catch (e) {
+      // Personalization is optional — continue without it
+      console.warn("Could not fetch user profile for personalization:", e);
+    }
+
     // Format messages for Anthropic (strip role, ensure user/assistant only)
     const formattedMessages = messages
       .filter((m: { role: string }) => m.role === "user" || m.role === "assistant")
@@ -98,7 +147,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        system: SYSTEM_PROMPT + userContext,
         messages: formattedMessages,
       }),
     });

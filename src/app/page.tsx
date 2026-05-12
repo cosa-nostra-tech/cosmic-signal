@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { ThematicGrid } from "@/components/thematics/ThematicGrid";
 import { DemoThematic } from "@/components/demo/DemoThematic";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 interface Thematic {
   id: string;
@@ -54,6 +55,17 @@ export default async function Home() {
         </Container>
       </>
     );
+  }
+
+  // Check onboarding status
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("onboarding_complete")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile?.onboarding_complete) {
+    redirect("/onboarding");
   }
 
   // Authenticated: fetch user's thematics
