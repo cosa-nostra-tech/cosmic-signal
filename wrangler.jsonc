@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "cosmic-signal",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "cosmic-signal"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "account_id": "d4558c8778a665bf856b6bf859aaba7e"
+}
